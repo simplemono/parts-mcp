@@ -1,66 +1,156 @@
 # Clojure MCP SDK
 
-A pure Clojure SDK for building Model Context Protocol (MCP) servers. This
-library provides everything you need to create MCP servers that work over both
-STDIO and HTTP transports.
+A composable Clojure SDK for building [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) servers, built on [parts.ring](https://github.com/simplemono/parts).
+
+Tools, prompts, and resources are defined as plain data maps. The SDK provides Ring handlers that plug into any parts.ring system. You bring your own HTTP server and own the session state.
 
 ## Features
 
-- **Full MCP Protocol Support**: Implements the complete MCP specification (protocol version 2025-06-18)
-- **Support all MCP types**: tools, prompts, resources, and resource templates
-- **Dual Transport Support**: Run servers over STDIO (standalone process) or HTTP (persistent server, easy to hack on)
-- **Capability negotiation**: Request roots from the client if they support it, notify client of new tools/resources/prompts
+- **MCP Protocol**: Implements the MCP specification (protocol version 2025-06-18)
+- **Streamable HTTP Transport**: HTTP/SSE via parts.ring + httpkit
+- **Data-driven**: Tools, prompts, resources are registration entries (plain maps)
+- **Composable**: Handlers integrate into any parts.ring system
+- **Bring your own server**: httpkit included, but core handlers are server-agnostic
 
 ## Quick Start
 
 Add to your `deps.edn`:
 
 ```clojure
-{:deps {co.gaiwan/mcp-sdk {:mvn/version "0.2.17"}}}
+{:deps {simplemono/mcp {:git/url "https://github.com/simplemono/mcp"
+                        :git/sha "..."}}}
 ```
 
-Create a simple MCP server:
+Create an MCP server:
 
 ```clojure
-(ns simple-mcp-server
-  (:require
-   [co.gaiwan.mcp :as mcp]
-   [co.gaiwan.mcp.state :as state]
-   [malli.json-schema :as mjs]))
+(ns my-mcp-server
+  (:require [parts.mcp :as mcp]
+            [parts.ring.route]
+            [parts.httpkit.server :as server]))
 
-;; Add a tool
-(state/add-tool
- {:name "greet"
-  :title "Greeting Tool"
-  :description "Sends a personalized greeting"
-  :schema (mjs/transform [:map [:name string?]])
-  :tool-fn (fn [req {:keys [name]}]
-             {:content [{:type "text" :text (str "Hello, " name "!")}]
-              :isError false})})
+;; Define tools as data
+(def tools
+  [(mcp/tool {:name "greet"
+              :description "Sends a personalized greeting"
+              :malli [:map [:name string?]]
+              :handler (fn [_w {:keys [name]}]
+                         {:content [{:type "text" :text (str "Hello, " name "!")}]
+                          :isError false})})])
 
-;; Add a prompt
-(state/add-prompt
- {:name "joke-rating"
-  :title "Joke Rater"
-  :description "Rate how funny a joke is"
-  :arguments [{:name "joke" :description "The joke to rate" :required true}]
-  :messages-fn (fn [req {:keys [joke]}]
-                 [{:role "user"
-                   :content {:type "text"
-                             :text (str "Rate this joke from 1-5:\n\n" joke)}}])})
+;; Define prompts as data
+(def prompts
+  [(mcp/prompt {:name "joke-rating"
+                :description "Rate how funny a joke is"
+                :arguments [{:name "joke" :description "The joke to rate" :required true}]
+                :handler (fn [_w {:keys [joke]}]
+                           [{:role "user"
+                             :content {:type "text"
+                                       :text (str "Rate this joke from 1-5:\n\n" joke)}}])})])
 
-#_(mcp/run-stdio! {})
-(mcp/run-http! {:port 3999})
+;; Session state (user-provided atom)
+(def sessions (atom {}))
+
+;; Registration function - concatenates all entries
+(defn get-register []
+  (concat tools
+          prompts
+          (mcp/routes)
+          parts.ring.route/register))
+
+;; System / world map
+(def system
+  (atom {:system/get-register #'get-register
+         :mcp/sessions sessions
+         :mcp/server-info {:name "My MCP Server" :version "1.0.0"}
+         :mcp/capabilities mcp/default-capabilities
+         :mcp/protocol-version mcp/protocol-version}))
+
+;; Start
+(server/start! system {:port 3999})
 ```
 
-## Development
+## Registration Entries
 
-This library uses [Launchpad](https://github.com/github/launchpad), use
-`bin/launchpad` to start a development process/REPL. See the Launchpad README
-for how to customize your `deps.local.edn`.
+Each helper returns a plain map that goes into the parts.ring register:
+
+### `mcp/tool`
+
+```clojure
+(mcp/tool {:name "add"
+           :description "Adds two numbers"
+           :malli [:map [:a number?] [:b number?]]  ;; or :schema for raw JSON Schema
+           :handler (fn [w args] {:content [{:type "text" :text (str (+ (:a args) (:b args)))}]})})
+```
+
+### `mcp/prompt`
+
+```clojure
+(mcp/prompt {:name "summarize"
+             :description "Summarize text"
+             :arguments [{:name "text" :description "Text to summarize" :required true}]
+             :handler (fn [w args] [{:role "user" :content {:type "text" :text (:text args)}}])})
+```
+
+### `mcp/resource`
+
+```clojure
+(mcp/resource {:uri "info://readme"
+               :name "README"
+               :description "Project readme"
+               :mimeType "text/plain"
+               :handler (fn [w] {:contents [{:uri "info://readme" :text (slurp "README.md")}]})})
+```
+
+### `mcp/resource-template`
+
+```clojure
+(mcp/resource-template {:uriTemplate "file:///{path}"
+                        :name "File"
+                        :description "Read a file"
+                        :handler (fn [w uri] {:contents [{:uri uri :text (slurp uri)}]})})
+```
+
+## Endpoints
+
+`(mcp/routes)` returns three route entries:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/mcp` | JSON-RPC requests, notifications, responses |
+| GET | `/mcp` | SSE notification stream |
+| DELETE | `/mcp` | Session termination |
+
+Customize the path with `(mcp/routes {:path "/my-mcp"})`.
+
+## Dynamic Notifications
+
+When tools/prompts/resources change at runtime, notify connected clients:
+
+```clojure
+(mcp/notify-tools-changed! sessions)
+(mcp/notify-prompts-changed! sessions)
+(mcp/notify-resources-changed! sessions)
+```
+
+## Examples
+
+See the `examples/` directory:
+
+- `httpkit_server.clj` - Full example with tools, prompts, and resources
+- `simple_mcp_server.clj` - Minimal server
+- `weather_server.clj` - Weather tools using the NWS API
+
+Run an example:
+
+```sh
+clj -M:example -m httpkit-server
+```
+
+## Acknowledgements
+
+Based on the [Gaiwan MCP SDK](https://github.com/GaiwanTeam/mcp-sdk).
 
 ## License
 
-Copyright © 2025 Arne Brasseur
-
-Licensed under the Apache License, Version 2.0.
+Apache License, Version 2.0.
