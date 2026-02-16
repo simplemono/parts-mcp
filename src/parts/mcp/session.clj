@@ -13,10 +13,11 @@
   (contains? @sessions-atom session-id))
 
 (defn destroy-session! [sessions-atom session-id]
-  (when-let [session (get @sessions-atom session-id)]
-    (doseq [[_ {:keys [close!]}] (:sse-connections session)]
-      (when close! (close!))))
-  (swap! sessions-atom dissoc session-id))
+  (let [old-sessions (first (swap-vals! sessions-atom dissoc session-id))
+        session (get old-sessions session-id)]
+    (when session
+      (doseq [[_ {:keys [close!]}] (:sse-connections session)]
+        (when close! (close!))))))
 
 (defn add-sse-connection! [sessions-atom session-id conn-id send! close!]
   (swap! sessions-atom assoc-in
