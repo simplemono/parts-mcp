@@ -4,7 +4,10 @@
    [parts.mcp.session :as session]))
 
 (defmulti handle-request (fn [w] (get-in w [:mcp/rpc-request :method])))
-(defmulti handle-response (fn [w] (get-in w [:mcp/rpc-request :method])))
+;; JSON-RPC responses don't carry :method, so response correlation requires
+;; tracking outbound requests by ID. For now, handle-response is a no-op.
+;; Extend this when outbound request tracking is added.
+(defmulti handle-response (fn [w] ::default))
 (defmulti handle-notification (fn [w] (get-in w [:mcp/rpc-request :method])))
 
 (defmethod handle-request "initialize" [w]
@@ -134,10 +137,5 @@
 (defmethod handle-notification :default [_w]
   nil)
 
-(defmethod handle-response "roots/list" [w]
-  (let [result (get-in w [:mcp/rpc-request :result])]
-    (session/update-session! (:mcp/sessions w) (:mcp/session-id w)
-                             assoc :roots (:roots result))))
-
-(defmethod handle-response :default [_w]
+(defmethod handle-response ::default [_w]
   nil)
