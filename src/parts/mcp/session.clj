@@ -30,8 +30,13 @@
 
 (defn send-to-session! [sessions-atom session-id message]
   (when-let [session (get @sessions-atom session-id)]
-    (doseq [[_ {:keys [send!]}] (:sse-connections session)]
-      (when send! (send! message)))))
+    (doseq [[conn-id {:keys [send!]}] (:sse-connections session)]
+      (when send!
+        (try
+          (send! message)
+          (catch Exception _
+            (swap! sessions-atom update-in
+                   [session-id :sse-connections] dissoc conn-id)))))))
 
 (defn broadcast-to-all-sessions! [sessions-atom message]
   (doseq [[session-id _] @sessions-atom]
