@@ -1,6 +1,10 @@
 (ns weather-server
-  (:require [co.gaiwan.mcp :as mcp]
-            [co.gaiwan.mcp.state :as state]
+  "Weather MCP server example using the National Weather Service API.
+
+  Run with: clj -M:example -m weather-server"
+  (:require [parts.mcp :as mcp]
+            [parts.ring.route]
+            [parts.httpkit.server :as server]
             [clojure.data.json :as json]
             [clojure.string :as str]
             [clj-http.client :as client]))
@@ -61,38 +65,54 @@
     (map forecast->str (take 5 forecast-periods))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; MCP
+;; MCP Tools
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(state/add-tool
- {:name "weather_alert"
-  :title "Weather Alert Tool"
-  :description "Given a two letter state code, finds the weather alerts for that state."
-  :schema {"type" "object"
-           "properties" {"state" {"type" "string"
-                                  "description" "Two letter state code"}}
-           "required" ["state"]}
-  :tool-fn (fn [_req {:keys [state]}]
-             (let [alerts (get-alerts state)]
-               {:content [{:type :text
-                           :text (str/join "\n" (vec alerts))}]
-                :isError false}))})
 
-(state/add-tool
- {:name "weather_forecast"
-  :title "Weather Forecast Tool"
-  :description "Get weather forecast for a location"
-  :schema {"type" "object"
-           "properties" {"latitude" {"type" "number"
-                                     "description" "Latitude of the location"}
-                         "longitude" {"type" "number"
-                                      "description" "Longitude of the location"}}
-           "required" ["latitude" "longitude"]}
-  :tool-fn (fn [_req {:keys [latitude longitude]}]
-             (let [forecast (get-forecast latitude longitude)]
-               {:content [{:type :text
-                           :text (str/join "\n" (vec forecast))}]
-                :isError false}))})
+(def tools
+  [(mcp/tool {:name "weather_alert"
+              :description "Given a two letter state code, finds the weather alerts for that state."
+              :schema {"type" "object"
+                       "properties" {"state" {"type" "string"
+                                              "description" "Two letter state code"}}
+                       "required" ["state"]}
+              :handler (fn [_w {:keys [state]}]
+                         (let [alerts (get-alerts state)]
+                           {:content [{:type "text"
+                                       :text (str/join "\n" (vec alerts))}]
+                            :isError false}))})
 
+   (mcp/tool {:name "weather_forecast"
+              :description "Get weather forecast for a location"
+              :schema {"type" "object"
+                       "properties" {"latitude" {"type" "number"
+                                                 "description" "Latitude of the location"}
+                                     "longitude" {"type" "number"
+                                                  "description" "Longitude of the location"}}
+                       "required" ["latitude" "longitude"]}
+              :handler (fn [_w {:keys [latitude longitude]}]
+                         (let [forecast (get-forecast latitude longitude)]
+                           {:content [{:type "text"
+                                       :text (str/join "\n" (vec forecast))}]
+                            :isError false}))})])
 
-;; Start MCP
-(mcp/run-http! {:port 3999})
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Server setup
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def sessions (atom {}))
+
+(defn get-register []
+  (concat tools
+          (mcp/routes)
+          parts.ring.route/register))
+
+(def system
+  (atom {:system/get-register #'get-register
+         :mcp/sessions sessions
+         :mcp/server-info {:name "Weather MCP Server" :version "1.0.0"}
+         :mcp/capabilities mcp/default-capabilities
+         :mcp/protocol-version mcp/protocol-version}))
+
+(defn -main [& _args]
+  (server/start! system {:port 3999})
+  (println "Weather MCP server started on http://localhost:3999/mcp"))

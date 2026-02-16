@@ -1,4 +1,4 @@
-(ns co.gaiwan.mcp.json-rpc)
+(ns parts.mcp.json-rpc)
 
 (def parse-error -32700)      ;; Parse error	 	Invalid JSON was received by the server.
 (def invalid-request -32600)  ;; Invalid Request 	The JSON sent is not a valid Request object.
@@ -34,3 +34,14 @@
    :error (cond-> {:code code}
             message (assoc :message message)
             data (assoc :data data))})
+
+;; Classification helpers
+
+(defn request? [msg]
+  (and (:id msg) (:method msg)))
+
+(defn notification? [msg]
+  (and (:method msg) (not (:id msg))))
+
+(defn response? [msg]
+  (and (:id msg) (or (:result msg) (:error msg))))

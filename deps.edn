@@ -1,21 +1,22 @@
 {:paths ["src" "resources"]
  :deps
- {com.lambdaisland/cli    {:mvn/version "0.24.97"}
+ {;; Routing + dispatch
+  simplemono.parts/ring
+  {:git/url "https://github.com/simplemono/parts"
+   :git/sha "4184add87e24bd92cdf6fcf92aee2852b58ba15b"
+   :deps/root "ring"}
 
-  ;; Logging
-  com.lambdaisland/log4j2 {:mvn/version "0.2.6"}
+  ;; HTTP server with SSE support
+  simplemono.parts/httpkit
+  {:git/url "https://github.com/simplemono/parts"
+   :git/sha "0a8353670975651ba2a41bfbe8ff7f2c5af15173"
+   :deps/root "httpkit"}
 
-  ;; HTTP
-  ring/ring-jetty-adapter     {:mvn/version "1.14.2"}
-  metosin/reitit-ring         {:mvn/version "0.9.1"}
-  metosin/reitit-middleware   {:mvn/version "0.9.1"}
-  metosin/muuntaja            {:mvn/version "0.6.11"}
-  fi.metosin/muuntaja-charred {:mvn/version "0.6.11"}
-  metosin/reitit-malli        {:mvn/version "0.9.1"}
+  ;; JSON
+  cheshire/cheshire {:mvn/version "5.13.0"}
 
-  ;; Formats and utilities
-  com.cnuernber/charred {:mvn/version "1.037"}
-  }
+  ;; Schema
+  metosin/malli {:mvn/version "0.16.4"}}
 
  :aliases
  {:dev
