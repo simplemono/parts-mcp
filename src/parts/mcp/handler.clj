@@ -92,6 +92,7 @@
                 ;; SSE mode
                 (let [respond (:ring/respond w)
                       sse-send! (:ring/sse-send! w)
+                      sse-close! (:ring/sse-close! w)
                       conn-id (str (random-uuid))]
                   (respond {:status 200
                             :headers {"Content-Type" "text/event-stream"
@@ -99,13 +100,20 @@
                                       "Connection" "keep-alive"
                                       "Mcp-Session-Id" session-id}})
                   (session/add-sse-connection!
-                   sessions session-id conn-id sse-send! nil)
+                   sessions session-id conn-id sse-send! sse-close!)
                   ;; Process each request and send response as SSE event
                   (doseq [req requests]
                     (let [response (process-message w req)]
                       (when response
                         (sse-send! {:event "message"
                                     :data (json/write-str response)}))))
+                  ;; Per the MCP Streamable HTTP spec, the server SHOULD
+                  ;; close the SSE stream after all responses have been
+                  ;; sent. Server-initiated messages go over the GET
+                  ;; stream instead.
+                  (session/remove-sse-connection! sessions session-id conn-id)
+                  (when sse-close!
+                    (sse-close!))
                   ;; Return w without :ring/response to signal async
                   w)
 
@@ -156,6 +164,7 @@
       :else
       (let [respond (:ring/respond w)
             sse-send! (:ring/sse-send! w)
+            sse-close! (:ring/sse-close! w)
             conn-id (str (random-uuid))]
         (respond {:status 200
                   :headers {"Content-Type" "text/event-stream"
@@ -163,7 +172,7 @@
                             "Connection" "keep-alive"
                             "Mcp-Session-Id" session-id}})
         (session/add-sse-connection!
-         sessions session-id conn-id sse-send! nil)
+         sessions session-id conn-id sse-send! sse-close!)
         ;; Return w without :ring/response to signal async
         w))))
 
